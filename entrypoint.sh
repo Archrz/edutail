@@ -5,13 +5,17 @@ export SYSTEMD_OFFLINE=1
 TS_SOCK=/var/run/tailscale/tailscaled.sock
 LAN_IF=${LAN_IF:-eth0}
 
+# --- helpers ---
+
 vpn_if() {
 	ip link show eduVPN >/dev/null 2>&1 && { echo eduVPN; return; }
-	ip link show tun0 >/dev/null 2>&1 && { echo tun0; return; }
+	ip link show tun0   >/dev/null 2>&1 && { echo tun0;   return; }
 	return 1
 }
 
-gw() { ip route show default dev "$1" 2>/dev/null | awk '/^default/{print $3;exit}'; }
+gw() {
+	ip route show default dev "$1" 2>/dev/null | awk '/^default/{print $3;exit}'
+}
 
 vpn_routes() {
 	dev=$(vpn_if) || return 0
@@ -24,8 +28,8 @@ vpn_routes() {
 
 local_routes() {
 	[ -n "${LOCAL_ROUTES:-}" ] || return 0
-	g=$(gw "$LAN_IF") || return 0
 	ip link show "$LAN_IF" >/dev/null 2>&1 || return 0
+	g=$(gw "$LAN_IF") || return 0
 	IFS=,
 	for c in $LOCAL_ROUTES; do
 		c=$(echo "$c" | tr -d ' ')
@@ -38,6 +42,8 @@ ts_routes() {
 	[ -S "$TS_SOCK" ] && tailscale --socket="$TS_SOCK" set --advertise-routes="$1" 2>/dev/null || true
 }
 
+# --- main loop: keeps Tailscale routes in sync with VPN state ---
+
 watch() {
 	last=; n=0
 	while true; do
@@ -49,47 +55,83 @@ watch() {
 			[ -z "$last" ] || { ts_routes ""; last=; }
 			[ $((n % 4)) -eq 0 ] && eduvpn-cli connect -t -n 1 || true
 		fi
-		n=$((n + 1)); sleep 5
+		n=$((n + 1))
+		sleep 5
 	done
 }
+
+# --- NetworkManager LAN setup (K8s) ---
 
 nm_lan() {
 	ip=$(ip -4 -o addr show dev "$LAN_IF" 2>/dev/null | awk '{print $4;exit}') || return 0
 	[ -n "$ip" ] || return 0
 	g=$(gw "$LAN_IF")
+
 	nmcli con delete "pod-$LAN_IF" 2>/dev/null || true
-	set -- ipv4.method manual ipv4.addresses "$ip" ipv6.method ignore ipv4.ignore-auto-dns yes ipv4.dns-priority 50
+
+	set -- \
+		ipv4.method manual \
+		ipv4.addresses "$ip" \
+		ipv4.ignore-auto-dns yes \
+		ipv4.dns-priority 50 \
+		ipv6.method ignore
 	[ -n "$g" ] && set -- "$@" ipv4.gateway "$g"
+
 	nmcli con add type ethernet con-name "pod-$LAN_IF" ifname "$LAN_IF" autoconnect yes "$@"
-	nmcli -w 45 con up "pod-$LAN_IF" ifname "$LAN_IF" || nmcli -w 45 device connect "$LAN_IF" || true
+	nmcli -w 45 con up "pod-$LAN_IF" ifname "$LAN_IF" \
+		|| nmcli -w 45 device connect "$LAN_IF" \
+		|| true
 }
+
+# --- Tailscale startup ---
 
 ts_start() {
 	: "${TS_AUTHKEY:?}"
 	tailscaled --state=/persist/ts/tailscaled.state --socket="$TS_SOCK" &
-	i=0; while [ $i -lt 30 ]; do [ -S "$TS_SOCK" ] && break; i=$((i + 1)); sleep 1; done
+
+	i=0
+	while [ $i -lt 30 ]; do
+		[ -S "$TS_SOCK" ] && break
+		i=$((i + 1)); sleep 1
+	done
 	[ -S "$TS_SOCK" ] || exit 1
+
 	tailscale --socket="$TS_SOCK" up \
 		--auth-key="$(printf %s "$TS_AUTHKEY" | tr -d '\r\n')" \
-		--hostname="${TS_HOSTNAME:-edutail}" --snat-subnet-routes=true --accept-dns=false
+		--hostname="${TS_HOSTNAME:-edutail}" \
+		--snat-subnet-routes=true \
+		--accept-dns=false
 }
 
+# --- init ---
+
 sysctl -w net.ipv4.ip_forward=1 net.ipv6.conf.all.forwarding=1 2>/dev/null || true
-mkdir -p /persist/ts /persist/eduvpn /persist/keyrings /root/.config /root/.local/share /run/dbus /var/run/tailscale
-ln -sfn /persist/eduvpn /root/.config/eduvpn
+
+mkdir -p \
+	/persist/ts /persist/eduvpn /persist/keyrings \
+	/root/.config /root/.local/share \
+	/run/dbus /var/run/tailscale
+
+ln -sfn /persist/eduvpn   /root/.config/eduvpn
 ln -sfn /persist/keyrings /root/.local/share/keyrings
+
 for o in eduVPN tun+ wg+; do
 	iptables -t nat -C POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null \
-		|| iptables -t nat -A POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null || true
+		|| iptables -t nat -A POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null \
+		|| true
 done
+
 dbus-daemon --system --fork 2>/dev/null || true
+
 if [ -x /usr/lib/systemd/systemd-udevd ]; then
 	mkdir -p /run/udev/rules.d
 	/usr/lib/systemd/systemd-udevd --daemon 2>/dev/null || true
-	udevadm control --reload-rules 2>/dev/null || true
-	udevadm trigger --action=add --subsystem-match=net 2>/dev/null || true
-	udevadm settle --timeout=8 2>/dev/null || true
+	udevadm control --reload-rules                       2>/dev/null || true
+	udevadm trigger --action=add --subsystem-match=net   2>/dev/null || true
+	udevadm settle --timeout=8                           2>/dev/null || true
 fi
+
+# --- start ---
 
 watch &
 ts_start
