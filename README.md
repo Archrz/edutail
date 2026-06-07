@@ -85,7 +85,7 @@ dnsConfig:
       value: "2"
 ```
 
-Point `nameservers` at your campus resolvers and your cluster DNS IP. That way both internal and in-cluster hostnames work.
+Point `nameservers` at your campus resolvers and your cluster DNS IP. `searches` is the domain suffix DNS adds to short names — so `myserver` becomes `myserver.campus.example.edu`.
 
 ## Kubernetes example
 
@@ -111,4 +111,14 @@ spec:
               name: edutail
               key: ts-authkey
         - {name: ADVERTISE_ROUTES, value: "172.16.10.0/24,10.0.50.0/24"}
+        - {name: HEALTHCHECK_URL, value: "https://myserver.campus.example.edu/"}
+      readinessProbe:
+        exec:
+          command:
+            - sh
+            - -ec
+            - ip link show eduVPN >/dev/null 2>&1 || ip link show tun0 >/dev/null 2>&1; [ -z "$HEALTHCHECK_URL" ] || curl -fsSk --max-time 15 -o /dev/null "$HEALTHCHECK_URL"
+        initialDelaySeconds: 45
+        periodSeconds: 120
+        timeoutSeconds: 20
 ```
