@@ -1,12 +1,49 @@
 # edutail
 
-EduTail is a container that runs **EduVPN** and **Tailscale** together as a subnet router. It connects your university VPN routes to a Tailscale network, so you can reach on-campus resources from anywhere.
+**edutail** runs EduVPN and Tailscale in one container and acts as a subnet router between them. Connect to your university VPN, share those routes over Tailscale, and reach campus networks from anywhere through tailscale.
 
-Built for Kubernetes pods. Configure routes with `LOCAL_ROUTES` and `ADVERTISE_ROUTES`.
+It's built to run in Kubernetes, but you can also run it with Docker.
 
-## Route examples
+## Usage
 
-**`LOCAL_ROUTES`** — comma-separated subnets reachable via the pod LAN interface (`eth0`). EduTail adds routes so traffic to these networks goes through the pod gateway.
+Pull the image:
+
+```bash
+docker pull ghcr.io/archrz/edutail:latest
+```
+
+Or build it yourself:
+
+```bash
+docker build -t edutail .
+```
+
+Run it locally (needs `--privileged` and a volume so VPN state survives restarts):
+
+```bash
+docker run -d --privileged \
+  -e TS_AUTHKEY=tskey-auth-xxxxx \
+  -v edutail-state:/persist \
+  ghcr.io/archrz/edutail:latest
+```
+
+For Kubernetes, deploy it as a privileged pod with `NM_MANAGE_LAN=1`. See the [full pod example](#kubernetes-example) at the bottom.
+
+## Available configurations
+
+| Variable           | Default    | What it does                                                          |
+|--------------------|:----------:|-----------------------------------------------------------------------|
+| `TS_AUTHKEY`       | —          | Tailscale auth key. Required.                                         |
+| `TS_HOSTNAME`      | `edutail`  | Name of this node in Tailscale                                        |
+| `LOCAL_ROUTES`     | —          | Subnets behind the pod that edutail should route to.                  |
+| `ADVERTISE_ROUTES` | —          | Extra subnets to share on Tailscale.                                  |
+| `NM_MANAGE_LAN`    | `0`        | Set to `1` if using in Kubernetes so NM handles the interface         |
+| `LAN_IF`           | `eth0`     | LAN interface to use                                                  |
+| `HEALTHCHECK_URL`  | —          | Optional URL for the readiness probe                                  |
+
+## Local routes
+
+Use `LOCAL_ROUTES` when the pod needs to reach networks on its LAN side — like your cluster service network or a pod CIDR. Pass multiple subnets as a comma-separated list:
 
 ```yaml
 env:
@@ -14,31 +51,64 @@ env:
     value: "10.42.0.0/16,192.168.1.0/24"
 ```
 
-Example: `10.42.0.0/16` is your cluster pod network; `192.168.1.0/24` is a LAN behind the pod.
+edutail adds a route for each subnet via the pod gateway on `eth0`, and keeps them updated every 5 seconds.
 
-**`ADVERTISE_ROUTES`** — comma-separated subnets to advertise on Tailscale, in addition to routes automically learned from EduVPN.
+## Advertise routes
+
+Use `ADVERTISE_ROUTES` to share extra subnets over Tailscale on top of whatever EduVPN already provides. You can list several at once:
 
 ```yaml
 env:
   - name: ADVERTISE_ROUTES
-    value: "172.16.10.0/24,10.0.50.0/24"
+    value: "172.16.10.0/24,10.0.50.0/24,192.168.50.0/24"
 ```
 
-Example: `172.16.10.0/24` is a university lab network; `10.0.50.0/24` is an internal service subnet. Tailscale clients can then reach these via the EduTail node (after you approve the routes in the Tailscale admin console).
+edutail combines the EduVPN routes with your `ADVERTISE_ROUTES`, then pushes the full list to Tailscale. It checks for changes every 5 seconds — so if EduVPN reconnects or picks up new routes, Tailscale gets updated too.
 
-**Both together** in a pod:
+You'll still need to approve the routes in the [Tailscale admin console](https://login.tailscale.com/admin/machines) before other devices can use them.
+
+## DNS
+
+edutail doesn't configure DNS on its own. In Kubernetes, set it on the pod so internal names still resolve while you're on VPN:
 
 ```yaml
-env:
-  - name: LOCAL_ROUTES
-    value: "10.42.0.0/16"
-  - name: ADVERTISE_ROUTES
-    value: "172.16.10.0/24"
-  - name: NM_MANAGE_LAN
-    value: "1"
-  - name: TS_AUTHKEY
-    valueFrom:
-      secretKeyRef:
-        name: tailscale-auth
-        key: TS_AUTHKEY
+dnsPolicy: None
+dnsConfig:
+  nameservers:
+    - 203.0.113.1    # campus DNS
+    - 203.0.113.2    # campus DNS backup
+    - 10.96.0.10     # cluster DNS
+  searches:
+    - campus.example.edu
+  options:
+    - name: ndots
+      value: "2"
+```
+
+Point `nameservers` at your campus resolvers and your cluster DNS IP. That way both internal and in-cluster hostnames work.
+
+## Kubernetes example
+
+```yaml
+spec:
+  dnsPolicy: None
+  dnsConfig:
+    nameservers: [203.0.113.1, 203.0.113.2, 10.96.0.10]
+    searches: [campus.example.edu]
+    options: [{name: ndots, value: "2"}]
+  containers:
+    - name: edutail
+      image: ghcr.io/archrz/edutail:latest
+      securityContext:
+        privileged: true
+      env:
+        - {name: TS_HOSTNAME, value: edutail}
+        - {name: NM_MANAGE_LAN, value: "1"}
+        - {name: LOCAL_ROUTES, value: "10.42.0.0/16,10.244.0.0/16"}
+        - name: TS_AUTHKEY
+          valueFrom:
+            secretKeyRef:
+              name: edutail
+              key: ts-authkey
+        - {name: ADVERTISE_ROUTES, value: "172.16.10.0/24,10.0.50.0/24"}
 ```
