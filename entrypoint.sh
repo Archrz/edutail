@@ -78,9 +78,7 @@ nm_lan() {
 	[ -n "$g" ] && set -- "$@" ipv4.gateway "$g"
 
 	nmcli con add type ethernet con-name "pod-$LAN_IF" ifname "$LAN_IF" autoconnect yes "$@"
-	nmcli -w 45 con up "pod-$LAN_IF" ifname "$LAN_IF" \
-		|| nmcli -w 45 device connect "$LAN_IF" \
-		|| true
+	nmcli -w 45 con up "pod-$LAN_IF" ifname "$LAN_IF" || nmcli -w 45 device connect "$LAN_IF" || true
 }
 
 # --- Tailscale startup ---
@@ -117,8 +115,7 @@ ln -sfn /persist/keyrings /root/.local/share/keyrings
 
 for o in eduVPN tun+ wg+; do
 	iptables -t nat -C POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null \
-		|| iptables -t nat -A POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null \
-		|| true
+		|| iptables -t nat -A POSTROUTING -o "$o" -j MASQUERADE 2>/dev/null || true
 done
 
 dbus-daemon --system --fork 2>/dev/null || true
