@@ -45,6 +45,8 @@ For Kubernetes, deploy it as a privileged pod with `NM_MANAGE_LAN=1`. See the [f
 
 Use `LOCAL_ROUTES` when the pod needs to reach networks on its LAN side — like your cluster service network or a pod CIDR. Pass multiple subnets as a comma-separated list:
 
+> **Warning:** Only add cluster-internal ranges if you really need them. If EduVPN is compromised, an attacker could tunnel through edutail into those subnets and reach the pod or cluster.
+
 ```yaml
 env:
   - name: LOCAL_ROUTES
@@ -104,7 +106,6 @@ spec:
       env:
         - {name: TS_HOSTNAME, value: edutail}
         - {name: NM_MANAGE_LAN, value: "1"}
-        - {name: LOCAL_ROUTES, value: "10.42.0.0/16,10.244.0.0/16"}
         - name: TS_AUTHKEY
           valueFrom:
             secretKeyRef:
