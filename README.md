@@ -116,8 +116,8 @@ spec:
         exec:
           command:
             - sh
-            - -ec
-            - ip link show eduVPN >/dev/null 2>&1 || ip link show tun0 >/dev/null 2>&1; [ -z "$HEALTHCHECK_URL" ] || curl -fsSk --max-time 15 -o /dev/null "$HEALTHCHECK_URL"
+            - -c
+            - curl -fsSk --max-time 15 -o /dev/null "$HEALTHCHECK_URL"
         initialDelaySeconds: 45
         periodSeconds: 120
         timeoutSeconds: 20
