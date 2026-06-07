@@ -29,7 +29,7 @@ docker run -d --privileged \
 
 For Kubernetes, deploy it as a privileged pod with `NM_MANAGE_LAN=1`. See the [full pod example](#kubernetes-example) at the bottom.
 
-## Available configurations
+## Environment variables
 
 | Variable           | Default    | What it does                                                          |
 |--------------------|:----------:|-----------------------------------------------------------------------|
