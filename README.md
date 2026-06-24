@@ -34,12 +34,12 @@ For Kubernetes, deploy it as a privileged pod with `NM_MANAGE_LAN=1`. See the [f
 | Variable           | Default    | What it does                                                          |
 |--------------------|:----------:|-----------------------------------------------------------------------|
 | `TS_AUTHKEY`       | —          | Tailscale auth key. Required.                                         |
-| `TS_HOSTNAME`      | `edutail`  | Name of this node in Tailscale                                        |
+| `TS_HOSTNAME`      | `edutail`  | Name of this node in Tailscale.                                       |
 | `LOCAL_ROUTES`     | —          | Subnets behind the pod that edutail should route to.                  |
 | `ADVERTISE_ROUTES` | —          | Extra subnets to share on Tailscale.                                  |
-| `NM_MANAGE_LAN`    | `0`        | Set to `1` if using in Kubernetes so NM handles the interface         |
-| `LAN_IF`           | `eth0`     | LAN interface to use                                                  |
-| `HEALTHCHECK_URL`  | —          | Optional URL for the readiness probe                                  |
+| `NM_MANAGE_LAN`    | `0`        | Set to `1` if using in K8s so NM handles the interface.               |
+| `LAN_IF`           | `eth0`     | LAN interface to use.                                                 |
+| `HEALTHCHECK_URL`  | —          | Optional URL for the readiness probe.                                 |
 
 ## Local routes
 
