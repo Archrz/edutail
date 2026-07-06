@@ -29,6 +29,36 @@ docker run -d --privileged \
 
 For Kubernetes, deploy it as a privileged pod with `NM_MANAGE_LAN=1`. See the [full pod example](#kubernetes-example) at the bottom.
 
+## Tailscale
+
+Set `TS_AUTHKEY` before the container starts. Create a reusable key in the [Tailscale admin console](https://login.tailscale.com/admin/settings/keys) — node state is stored in `/persist/ts`, so the key is only used on first join.
+
+```bash
+kubectl create secret generic edutail -n edutail \
+  --from-literal=ts-authkey='tskey-auth-xxxxxxxx'
+```
+
+Subnet routes still need approval in the admin console before other tailnet devices can use them (see [Advertise routes](#advertise-routes)).
+
+## EduVPN
+
+EduVPN profiles and OAuth tokens are stored in `/persist/eduvpn`. Run `eduvpn-cli interactive` once to pick your institute server and sign in; use the same command to renew when tokens expire.
+
+When OAuth is needed for `connect` or `renew`. I recommend `interactive` for first time use, but it prints an authorize URL with a random loopback port (`redirect_uri=http://127.0.0.1:PORT/callback`). 
+
+```bash
+kubectl exec -it deploy/edutail -n edutail -- eduvpn-cli interactive
+```
+
+Note `PORT` from that output, then forward it — your browser runs on your machine, not inside the container:
+```bash
+kubectl port-forward -n edutail deploy/edutail PORT:PORT
+```
+
+With Docker, publish the same port: `docker run -p PORT:PORT ...`.
+
+When the session is close to expiring, run `renew` or `connect` inside the interactive shell, or run `interactive` again — same port-forward step if OAuth runs. Check status with `eduvpn-cli status` — `Valid for: expired` means you need to re-auth. If you set `HEALTHCHECK_URL`, the readiness probe fails until the VPN tunnel is up again.
+
 ## Environment variables
 
 | Variable           | Default    | What it does                                                          |
