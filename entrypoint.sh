@@ -55,6 +55,7 @@ watch() {
 			[ -z "$last" ] || { ts_routes ""; last=; }
 			[ $((n % 4)) -eq 0 ] && eduvpn-cli connect -t -n 1 || true
 		fi
+		[ $((n % 17280)) -eq 0 ] && { apt-get update -qq >/dev/null && apt-get install -y --only-upgrade tailscale >/dev/null; }
 		n=$((n + 1))
 		sleep 5
 	done
